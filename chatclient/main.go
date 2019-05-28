@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"net"
 	"math/rand"
-	"chat/protocol"
+
+	"chat-socket/protocol"
 )
 
 var name string
@@ -31,7 +32,6 @@ func main() {
 
 	//第一次登陆
 	login(conn)
-	fmt.Println("after login")
 	//接收消息
 	go receive(conn)
 
@@ -120,28 +120,13 @@ type ReceiveSocketContent struct {
 	MgsUserName string
 }
 
+//发送数据
+//func send()
+
 
 //显示收到的内容
 func receive(conn net.Conn) {
 	defer conn.Close()
-
-	//声明一个临时缓冲区，用来存储被截断的数据
-	tmpBuffer := make([]byte, 0)
-	buffer := make([]byte, 4089)
-
-	//声明一个管道用于接收解包的数据
-	readerChannel := make(chan []byte, 16)
-	for {
-		n, err := conn.Read(buffer)
-		if err != nil {
-			//log(conn.RemoteAddr().String(), " connection error: ", err)
-			return
-		}
-		tmpBuffer = protocol.Unpack(append(tmpBuffer, buffer[:n]...), readerChannel)
-
-		fmt.Println("buffer")
-		fmt.Println(string(tmpBuffer))
-	}
 
 	for {
 		data := make([]byte, 1024)
@@ -151,29 +136,40 @@ func receive(conn net.Conn) {
 			return
 		}
 
-		receiveSocketContent := ReceiveSocketContent{}
-		fmt.Println(string(data[:c]))
-		fmt.Println(123123)
-		unmarshalErr := json.Unmarshal(data[:c], &receiveSocketContent)
+		//可读缓存取
+		readerChannel := make(chan []byte, 1024)
+		//实际缓存区
+		remainBuffer := make([]byte, 0)
 
-		if unmarshalErr != nil {
-			fmt.Println("json error")
-			fmt.Println(unmarshalErr.Error())
-		}
-		fmt.Println(receiveSocketContent)
+		//解析自定义的协议
+		remainBuffer =   protocol.NewDefaultPacket(append(remainBuffer,data[:c]...)).UnPacket(readerChannel)
 
-		//将用户的uid 赋值
-		if receiveSocketContent.MsgType == 3{
-			uid = receiveSocketContent.MgsUserId
-		}
+		go func(reader chan []byte) {
+			for {
 
-		if receiveSocketContent.MsgType == 1 {
-			fmt.Printf("系统消息：%s \n",receiveSocketContent.MsgContent)
-		}
-		if receiveSocketContent.MsgType == 2 {
-			fmt.Printf("【%s】:%s",receiveSocketContent.MgsUserName,receiveSocketContent.MsgContent)
-		}
+				packageData := <- reader
 
+				receiveSocketContent := ReceiveSocketContent{}
 
+				unmarshalErr := json.Unmarshal(packageData, &receiveSocketContent)
+
+				if unmarshalErr != nil {
+					fmt.Println(unmarshalErr.Error())
+				}
+
+				//将用户的uid 赋值
+				if receiveSocketContent.MsgType == 3{
+					uid = receiveSocketContent.MgsUserId
+				}
+
+				if receiveSocketContent.MsgType == 1 {
+					fmt.Printf("系统消息：%s \n",receiveSocketContent.MsgContent)
+				}
+				if receiveSocketContent.MsgType == 2 {
+					fmt.Printf("【%s】:%s",receiveSocketContent.MgsUserName,receiveSocketContent.MsgContent)
+				}
+
+			}
+		}(readerChannel)
 	}
 }

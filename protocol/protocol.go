@@ -1,126 +1,82 @@
-
 package protocol
 
-
-
 import (
-
 	"bytes"
-
 	"encoding/binary"
-
 )
-
-
 
 const (
-
-	ConstHeader         = "www.01happy.com"
-
-	ConstHeaderLength   = 15
-
-	ConstSaveDataLength = 4
-
+	DEFAULE_HEADER           = "[**********]"
+	DEFAULT_HEADER_LENGTH    = 12
+	DEFAULT_SAVE_DATA_LENGTH = 4
 )
 
-
-
-//封包
-
-func Packet(message []byte) []byte {
-
-	return append(append([]byte(ConstHeader), IntToBytes(len(message))...), message...)
-
+type Packet struct {
+	Header         string
+	HeaderLengh    int32
+	SaveDataLength int32
+	Data           []byte
 }
 
+//set delimiter header
+func (self *Packet) SetHeader(header string) *Packet {
+	self.Header = header
+	self.HeaderLengh = int32(len([]byte(header)))
+	return self
+}
 
+//create default package
+func NewDefaultPacket(data []byte) *Packet {
+	return &Packet{DEFAULE_HEADER, DEFAULT_HEADER_LENGTH, DEFAULT_SAVE_DATA_LENGTH, data}
+}
 
-//解包
+//convert to net package
+func (self *Packet) Packet() []byte {
+	return append(append([]byte(self.Header), self.IntToBytes(int32(len(self.Data)))...), self.Data...)
+}
 
-func Unpack(buffer []byte, readerChannel chan []byte) []byte {
-
-	length := len(buffer)
-
-
-
-	var i int
-
-	for i = 0; i < length; i = i + 1 {
-
-		if length < i+ConstHeaderLength+ConstSaveDataLength {
-
+//return value is sticky data
+func (self *Packet) UnPacket(readerChannel chan []byte) []byte {
+	dataLen := int32(len(self.Data))
+	var i int32
+	for i = 0; i < dataLen; i++ {
+		//Termiate for loop when the remaining data is insufficient .
+		if dataLen < i+self.HeaderLengh+self.SaveDataLength {
 			break
-
 		}
-
-		if string(buffer[i:i+ConstHeaderLength]) == ConstHeader {
-
-			messageLength := BytesToInt(buffer[i+ConstHeaderLength : i+ConstHeaderLength+ConstSaveDataLength])
-
-			if length < i+ConstHeaderLength+ConstSaveDataLength+messageLength {
-
+		//find Header
+		if string(self.Data[i:i+self.HeaderLengh]) == self.Header {
+			saveDataLenBeginIndex := i + self.HeaderLengh
+			actualDataLen := self.BytesToInt(self.Data[saveDataLenBeginIndex : saveDataLenBeginIndex+self.SaveDataLength])
+			//The remaining data is less than one package
+			if dataLen < i+self.HeaderLengh+self.SaveDataLength+actualDataLen {
 				break
-
 			}
-
-			data := buffer[i+ConstHeaderLength+ConstSaveDataLength : i+ConstHeaderLength+ConstSaveDataLength+messageLength]
-
-			readerChannel <- data
-
-
-
-			i += ConstHeaderLength + ConstSaveDataLength + messageLength - 1
-
+			//Get a packet
+			packageData := self.Data[saveDataLenBeginIndex+self.SaveDataLength : saveDataLenBeginIndex+self.SaveDataLength+actualDataLen]
+			//send pacakge data to reader channel
+			readerChannel <- packageData
+			//get next package index
+			i += self.HeaderLengh + self.SaveDataLength + actualDataLen - 1
 		}
-
 	}
-
-
-
-	if i == length {
-
-		return make([]byte, 0)
-
+	//Reach the end
+	if i >= dataLen {
+		return []byte{}
 	}
-
-	return buffer[i:]
-
+	//Returns the remaining data
+	return self.Data[i:]
 }
 
-
-
-//整形转换成字节
-
-func IntToBytes(n int) []byte {
-
-	x := int32(n)
-
-
-
-	bytesBuffer := bytes.NewBuffer([]byte{})
-
-	binary.Write(bytesBuffer, binary.BigEndian, x)
-
-	return bytesBuffer.Bytes()
-
+func (self *Packet) IntToBytes(i int32) []byte {
+	byteBuffer := bytes.NewBuffer([]byte{})
+	binary.Write(byteBuffer, binary.BigEndian, i)
+	return byteBuffer.Bytes()
 }
 
-
-
-//字节转换成整形
-
-func BytesToInt(b []byte) int {
-
-	bytesBuffer := bytes.NewBuffer(b)
-
-
-
-	var x int32
-
-	binary.Read(bytesBuffer, binary.BigEndian, &x)
-
-
-
-	return int(x)
-
+func (self *Packet) BytesToInt(data []byte) int32 {
+	var val int32
+	byteBuffer := bytes.NewBuffer(data)
+	binary.Read(byteBuffer, binary.BigEndian, &val)
+	return val
 }

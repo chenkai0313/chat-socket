@@ -7,6 +7,10 @@ import (
 	"encoding/json"
 	"github.com/satori/go.uuid"
 	"time"
+	"strconv"
+	"math/rand"
+	"strings"
+	"chat-socket/protocol"
 )
 
 func main() {
@@ -135,11 +139,11 @@ func loginClinet(receiveContent SocketContent,conn net.Conn)  {
 	fmt.Printf("【%v】当前共有【%v】个用户 \n",time_str,len(UserManagers))
 
 	//返回给当前用户系统消息
-	//var sys_msg Msg
-	//sys_msg.Con=conn
-	//sys_msg.Content = "系统消息"
-	//sys_msg.Msg_type=3
-	//NeedSendMsgs[uuid] <-sys_msg
+	var sys_msg Msg
+	sys_msg.Con=conn
+	sys_msg.Content = "系统消息"
+	sys_msg.Msg_type=3
+	NeedSendMsgs[uuid] <-sys_msg
 
 
 	//用户第一次登陆通知所有房间内的人
@@ -194,10 +198,12 @@ func sendMsg(uuid string)  {
 				fmt.Println(errs.Error())
 			}
 
-			fmt.Println("need send json")
-			fmt.Println(string(jsonContent))
+			fmt.Printf("json len:[%v] \n",len(jsonContent))
 
-			_, err = talkContent.Con.Write(jsonContent)
+			//NewDefaultPacket
+			dataPackage := protocol.NewDefaultPacket([]byte(jsonContent)).Packet()
+
+			_, err = talkContent.Con.Write(dataPackage)
 			if err != nil {
 				//closed <- true
 			}
@@ -207,7 +213,24 @@ func sendMsg(uuid string)  {
 }
 
 
-
+/**
+*生成随机字符
+**/
+func RandString(length int) string {
+	rand.Seed(time.Now().UnixNano())
+	rs := make([]string, length)
+	for start := 0; start < length; start++ {
+		t := rand.Intn(3)
+		if t == 0 {
+			rs = append(rs, strconv.Itoa(rand.Intn(10)))
+		} else if t == 1 {
+			rs = append(rs, string(rand.Intn(26)+65))
+		} else {
+			rs = append(rs, string(rand.Intn(26)+97))
+		}
+	}
+	return strings.Join(rs, "")
+}
 
 
 
