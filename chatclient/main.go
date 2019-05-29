@@ -28,7 +28,7 @@ var uid string
 var roomId int
 
 func main() {
-	conn, err := net.Dial("tcp", "127.0.0.1:6011")
+	conn, err := net.Dial("tcp", "127.0.0.1:8089")
 	if err != nil {
 		panic(err)
 	}

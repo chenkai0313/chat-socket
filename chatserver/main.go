@@ -50,7 +50,7 @@ func main() {
 	/**
 	建立监听链接
 	*/
-	ln, err := net.Listen("tcp", "127.0.0.1:6011")
+	ln, err := net.Listen("tcp", "127.0.0.1:8089")
 	if err != nil {
 		panic(err)
 	}
