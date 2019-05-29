@@ -7,11 +7,40 @@ import (
 	"encoding/json"
 	"github.com/satori/go.uuid"
 	"time"
-	"strconv"
-	"math/rand"
-	"strings"
 	"chat-socket/protocol"
 )
+
+type SocketContent struct {
+	Name    string
+	Uid     int //0为默认值
+	RoomId  int
+	Status  int  //1 登陆 2登陆中 3退出
+	Content string
+	SendUid int //0为默认值
+}
+
+//组用户
+type User struct {
+	Name   string
+	RoomId int
+	UserId string
+	Con    net.Conn
+}
+
+type Users struct {
+	User []User
+}
+
+type Msg struct {
+	Content string
+	Con net.Conn
+	Msg_type int //1登陆消息 2内容消息 3系统消息
+	SendName string
+}
+
+var NeedSendMsgs = make(map[string]chan Msg)    //消息组
+var RoomManagers = make(map[int][]User) //房间组
+var UserManagers = make(map[string][]User) //用户组
 
 func main() {
 
@@ -33,79 +62,72 @@ func main() {
 	}
 }
 
-type SocketContent struct {
-	Name    string
-	Uid     int //0为默认值
-	RoomId  int
-	Status  int  //1 登陆 2登陆中 3退出
-	Content string
-	SendUid int //0为默认值
-}
-
+//处理链接
 func handleConnect(conn net.Conn)  {
-	////声明一个临时缓冲区，用来存储被截断的数据
-	//tmpBuffer := make([]byte, 0)
-	//buffer := make([]byte, 1024)
-	//
-	////声明一个管道用于接收解包的数据
-	//
-	//readerChannel := make(chan []byte, 16)
-	//for {
-	//	n, err := conn.Read(buffer)
-	//	if err != nil {
-	//		//log(conn.RemoteAddr().String(), " connection error: ", err)
-	//		return
-	//	}
-	//
-	//	tmpBuffer = protocol.Unpack(append(tmpBuffer, buffer[:n]...), readerChannel)
-	//}
 
 	for {
 		data := make([]byte, 1024)
+
+		//可读缓存取
+		readerChannel := make(chan []byte, 1024)
+		//实际缓存区
+		remainBuffer := make([]byte, 0)
+
 		c, err := conn.Read(data)
 		if err != nil {
-			//closed <- true  //这样会阻塞 | 后面取closed的for循环，没有执行到。
 			return
 		}
 
-		//content:=string(data)
-		//fmt.Println(content)
-		//获取内容
-		receiveContent := SocketContent{}
-		unmarshalErr := json.Unmarshal(data[:c], &receiveContent)
-		if unmarshalErr != nil {
-			fmt.Println(unmarshalErr.Error())
-		}
+		//解析自定义协议的数据
+		remainBuffer = protocol.NewDefaultPacket(append(remainBuffer, data[:c]...)).UnPacket(readerChannel)
 
-		//登陆
-		if receiveContent.Status == 1{
-			loginClinet(receiveContent,conn)
+		//处理读取的数据
+		go func(reader chan []byte) {
+			for {
+
+				packageData := <-reader
+
+				receiveSocketContent := SocketContent{}
+
+				unmarshalErr := json.Unmarshal(packageData, &receiveSocketContent)
+
+				if unmarshalErr != nil {
+					fmt.Println(unmarshalErr.Error())
+				}
+
+				//登陆
+				if receiveSocketContent.Status == 1{
+					loginClinet(receiveSocketContent,conn)
+				}
+
+				//登陆中
+				if receiveSocketContent.Status == 2{
+					chat(receiveSocketContent,conn)
+				}
+
+			}
+		}(readerChannel)
+
+	}
+}
+
+func chat(receiveContent SocketContent,conn net.Conn)  {
+	//和房间内人聊天
+	if receiveContent.SendUid ==0{
+		for _,v:=range RoomManagers[receiveContent.RoomId]  {
+			var msg Msg
+			msg.Con=v.Con
+			msg.Content=receiveContent.Content
+			msg.Msg_type=2
+			msg.SendName=receiveContent.Name
+
+			NeedSendMsgs[v.UserId] <- msg
 		}
 	}
-	return
 }
 
-//组用户
-type User struct {
-	Name   string
-	RoomId int
-	UserId string
-	Con    net.Conn
-}
 
-type Users struct {
-	User []User
-}
 
-type Msg struct {
-	Content string
-	Con net.Conn
-	Msg_type int //1登陆消息 2内容消息 3系统消息
-}
-
-var NeedSendMsgs = make(map[string]chan Msg)    //消息组
-var RoomManagers = make(map[int][]User) //房间组
-var UserManagers = make(map[string][]User) //用户组
 
 
 //用户登陆 分配uid 创建用户的通道
@@ -143,6 +165,7 @@ func loginClinet(receiveContent SocketContent,conn net.Conn)  {
 	sys_msg.Con=conn
 	sys_msg.Content = "系统消息"
 	sys_msg.Msg_type=3
+	sys_msg.SendName=""
 	NeedSendMsgs[uuid] <-sys_msg
 
 
@@ -153,10 +176,9 @@ func loginClinet(receiveContent SocketContent,conn net.Conn)  {
 		msg.Con=v.Con
 		msg.Content=welcome
 		msg.Msg_type=1
+		msg.SendName="系统"
 		NeedSendMsgs[v.UserId] <- msg
 	}
-
-
 
 	//创建当前用户的协程读取信息
 	go sendMsg(uuid)
@@ -182,12 +204,12 @@ func sendMsg(uuid string)  {
 			sysMsg.MgsUserId=uuid
 			sysMsg.MsgContent=talkContent.Content
 
-			userName :=""
-			for _,v:=range UserManagers[uuid] {
-				userName=v.Name
-			}
+			//userName :=""
+			//for _,v:=range UserManagers[uuid] {
+			//	userName=v.Name
+			//}
 
-			sysMsg.MgsUserName=userName
+			sysMsg.MgsUserName=talkContent.SendName
 
 			fmt.Println("need send")
 			fmt.Println(sysMsg)
@@ -212,25 +234,6 @@ func sendMsg(uuid string)  {
 	}
 }
 
-
-/**
-*生成随机字符
-**/
-func RandString(length int) string {
-	rand.Seed(time.Now().UnixNano())
-	rs := make([]string, length)
-	for start := 0; start < length; start++ {
-		t := rand.Intn(3)
-		if t == 0 {
-			rs = append(rs, strconv.Itoa(rand.Intn(10)))
-		} else if t == 1 {
-			rs = append(rs, string(rand.Intn(26)+65))
-		} else {
-			rs = append(rs, string(rand.Intn(26)+97))
-		}
-	}
-	return strings.Join(rs, "")
-}
 
 
 
