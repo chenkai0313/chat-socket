@@ -7,15 +7,18 @@ import (
 	"math/rand"
 	"chat-socket/protocol"
 	"strconv"
+	"os"
+	"os/signal"
 )
 
 type SocketContent struct {
-	Name    string
-	Uid     string //0为默认值
-	RoomId  int
-	Status  int //1 登陆 2登陆中 3退出
-	Content string
-	SendUid int //0为默认值
+	Name        string
+	Uid         string //0为默认值
+	RoomId      int
+	Status      int //1 登陆 2登陆中 3退出
+	Content     string
+	SendUid     int //0为默认值
+	ContentType int //1 正常内容 2指令内容
 }
 
 //定义需要发送的数据通道
@@ -36,6 +39,8 @@ func main() {
 
 	//第一次登陆
 	login()
+
+	go forcedLayout()
 	//接收消息
 	go receive(conn)
 	//发送消息
@@ -45,28 +50,43 @@ func main() {
 		var talkContent string
 
 		fmt.Scanln(&talkContent)
-
-		//fmt.Println("您：", talkContent)
-
-		//判断内容
-		switch talkContent {
-		case "listFriends":
-			listFriends() //获取所有登陆中的人
-		case "listRoomFrineds":
-			listRoomClients() //获取房间内的人
-		case "getUid":
-			getUid() //获取用户id
-		case "help":
-			getHelp() //获取用户id
-		default:
-			chatWithRoom(talkContent)
+		if talkContent!=""{
+			//判断内容
+			switch talkContent {
+			case "getLoginCounts":
+				chat(talkContent,2) //获取所有登陆中的人的总数
+			case "getRoomLoginCounts":
+				chat(talkContent,2)//获取房间内的人的总数
+			case "getUid":
+				getUid() //获取用户id
+			case "help":
+				getHelp() //获取用户id
+			case "exit":
+				chat(talkContent,2)
+			default:
+				chat(talkContent,1)
+			}
 		}
-
 	}
 }
 
-//和同一个房间内的人聊天
-func chatWithRoom(talkContent string)  {
+//捕捉ctrl+c/z 退出
+func forcedLayout()  {
+	signalChan := make(chan os.Signal, 1)
+	cleanupDone := make(chan bool)
+	signal.Notify(signalChan, os.Interrupt)
+	go func() {
+		for  range signalChan {
+			//
+			chat("exit",2)
+			cleanupDone <- true
+		}
+	}()
+	<-cleanupDone
+}
+
+
+func chat(talkContent string,ContentType int) {
 	var socketContent SocketContent
 	socketContent.Name = name
 	socketContent.Uid = uid
@@ -74,25 +94,30 @@ func chatWithRoom(talkContent string)  {
 	socketContent.Status = 2
 	socketContent.Content = talkContent
 	socketContent.SendUid = 0
+	socketContent.ContentType = ContentType
 
 	NeedSeed <- socketContent
 }
 
-func getHelp()  {
-	var helps = [5]string{"---listFriends  获取所有登陆中的人", "---listRoomFrineds 获取房间内的人","---getUid 获取用户id","---help 获取更多帮助"}
-	for _,v:=range helps {
+func getHelp() {
+	var helps = [5]string{"---getLoginCounts  获取所有登陆中的人的总数", "---getRoomLoginCounts 获取房间内的人的总数", "---getUid 获取用户id", "---help 获取更多帮助"}
+	for _, v := range helps {
 		fmt.Println(v)
 	}
 }
 
 func firstInput() {
 	var TempName string
-	fmt.Println("输入用户名：")
-	fmt.Scanln(&TempName)
-
 	var TempRoomIdString string
 
 	for {
+		fmt.Println("输入用户名：")
+		fmt.Scanln(&TempName)
+		if TempName == ""{
+			continue
+		}
+		name = TempName
+
 		var TempRoomIdInt int
 
 		fmt.Println("输入加入的roomId：")
@@ -105,7 +130,6 @@ func firstInput() {
 		}
 		fmt.Println("请输入有效值必须大于0的整数")
 	}
-	name = TempName
 
 	fmt.Printf("输入的用户名为[%v],roomid为[%v] \n", name, roomId)
 }
@@ -119,6 +143,7 @@ func login() {
 	socketContent.Status = 1
 	socketContent.Content = "login"
 	socketContent.SendUid = 0
+	socketContent.ContentType = 1
 
 	NeedSeed <- socketContent
 }
@@ -149,30 +174,17 @@ func send(conn net.Conn) {
 }
 
 func getUid() {
-	fmt.Println("get uid")
+	fmt.Printf("系统消息：name [%s] userid [%s] \n", name,uid)
 }
 
-//获取所有登陆中的人
-func listFriends() {
-	fmt.Println("list friends")
-}
 
-//获取房间内的人
-func listRoomClients() {
-	fmt.Println("list room clients")
-
-}
-
-//退出 ctrl+c 平滑退出
-func layout() {
-	fmt.Println("layout")
-}
 
 type ReceiveSocketContent struct {
 	MsgType     int //1登陆消息 2内容消息 3系统消息
 	MsgContent  string
 	MgsUserId   string
 	MgsUserName string
+	ContentType int //1 正常内容 2指令内容
 }
 
 //显示收到的内容
@@ -207,22 +219,34 @@ func receive(conn net.Conn) {
 					fmt.Println(unmarshalErr.Error())
 				}
 
-				//将用户的uid 赋值
-				if receiveSocketContent.MsgType == 3 {
-					uid = receiveSocketContent.MgsUserId
+				//内容消息展示
+				if receiveSocketContent.ContentType == 1{
+
+					//将用户的uid 赋值
+					if receiveSocketContent.MsgType == 3 {
+						uid = receiveSocketContent.MgsUserId
+					}
+
+					if receiveSocketContent.MsgType == 1 {
+						fmt.Printf("系统消息：%s \n", receiveSocketContent.MsgContent)
+					}
+
+					//fmt.Println(receiveSocketContent)
+					if receiveSocketContent.MsgType == 2 && receiveSocketContent.MgsUserName != name {
+						fmt.Printf("【%s】:%s \n", receiveSocketContent.MgsUserName, receiveSocketContent.MsgContent)
+					}
+
 				}
 
-				if receiveSocketContent.MsgType == 1 {
-					fmt.Printf("系统消息：%s \n", receiveSocketContent.MsgContent)
-				}
-
-				//fmt.Println(receiveSocketContent)
-
-				if receiveSocketContent.MsgType == 2 && receiveSocketContent.MgsUserName!=name{
+				//指令消息展示
+				if receiveSocketContent.ContentType == 2{
 					fmt.Printf("【%s】:%s \n", receiveSocketContent.MgsUserName, receiveSocketContent.MsgContent)
 				}
-
-
+				//指令消息展示
+				if receiveSocketContent.ContentType == 4{
+					fmt.Printf("【%s】:%s \n", receiveSocketContent.MgsUserName, receiveSocketContent.MsgContent)
+					os.Exit(3)
+				}
 
 			}
 		}(readerChannel)
