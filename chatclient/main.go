@@ -35,6 +35,8 @@ func main() {
 
 	defer conn.Close()
 
+	getHelp()
+
 	firstInput()
 
 	//第一次登陆
@@ -100,7 +102,7 @@ func chat(talkContent string,ContentType int) {
 }
 
 func getHelp() {
-	var helps = [5]string{"---getLoginCounts  获取所有登陆中的人的总数", "---getRoomLoginCounts 获取房间内的人的总数", "---getUid 获取用户id", "---help 获取更多帮助"}
+	var helps = [5]string{"---getLoginCounts  获取所有登陆中的人的总数", "---getRoomLoginCounts 获取房间内的人的总数", "---getUid 获取用户id", "---exit 退出程序","---help 获取更多帮助"}
 	for _, v := range helps {
 		fmt.Println(v)
 	}
